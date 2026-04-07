@@ -92,7 +92,7 @@ def create_tmux_session_with_claude(session_name: str, working_dir: str | None =
             print(f"Error: directory '{resolved}' does not exist.")
             raise SystemExit(1)
         cmd.extend(["-c", resolved])
-    cmd.append("claude")
+    cmd.append("claude --dangerously-skip-permissions")
     subprocess.run(cmd, check=True, timeout=30)
 
 
