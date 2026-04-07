@@ -12,7 +12,8 @@ import tempfile
 import time
 
 
-SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
+DATA_DIR = os.path.expanduser("~/.claudemux")
+SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 HOOK_SOURCE = os.path.join(os.path.dirname(__file__), "hooks", "on-stop.sh")
 HOOK_INSTALL_DIR = os.path.expanduser("~/.claude/hooks")
 HOOK_INSTALLED_PATH = os.path.join(HOOK_INSTALL_DIR, "claude-tmux-on-stop.sh")
@@ -65,6 +66,7 @@ def load_sessions() -> dict[str, str]:
 
 def save_sessions(sessions: dict[str, str]) -> None:
     dir_path = os.path.dirname(SESSIONS_FILE)
+    os.makedirs(dir_path, exist_ok=True)
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:

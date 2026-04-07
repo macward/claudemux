@@ -7,4 +7,4 @@ requires-python = ">=3.13"
 dependencies = []
 
 [project.scripts]
-claudemux = "main:main"
+claudemux = "claudemux.main:main"
