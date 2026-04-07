@@ -288,6 +288,9 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"Session '{session_name}' created (detached).")
         return
 
+    if args.here:
+        os.execvp("tmux", ["tmux", "attach-session", "-t", session_name])
+
     terminal = args.terminal if args.terminal else detect_terminal()
     print(f"Opening {terminal} with layout '{layout}'...")
     open_terminal_with_tmux(session_name, layout, terminal)
@@ -629,6 +632,11 @@ def main() -> None:
         "--detach",
         action="store_true",
         help="Create tmux session without opening a terminal",
+    )
+    start_parser.add_argument(
+        "--here",
+        action="store_true",
+        help="Attach to the session in the current terminal instead of opening a new window",
     )
 
     save_parser = subparsers.add_parser("save", help="Save a session name + path")
