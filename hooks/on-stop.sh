@@ -7,8 +7,16 @@ mkdir -p "$SIGNAL_DIR"
 INPUT=$(cat)
 
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
+
+if [[ ! "$SESSION_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "Error: invalid session_id '$SESSION_ID'" >&2
+    exit 1
+fi
+
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path')
 CWD=$(echo "$INPUT" | jq -r '.cwd')
+
+TMPFILE=$(mktemp "${SIGNAL_DIR}/${SESSION_ID}.XXXXXX.tmp")
 
 jq -n \
   --arg session_id "$SESSION_ID" \
@@ -20,6 +28,8 @@ jq -n \
     transcript_path: $transcript_path,
     cwd: $cwd,
     completed_at: $completed_at
-  }' > "${SIGNAL_DIR}/${SESSION_ID}.json"
+  }' > "$TMPFILE"
+
+mv "$TMPFILE" "${SIGNAL_DIR}/${SESSION_ID}.json"
 
 exit 0

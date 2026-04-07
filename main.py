@@ -12,16 +12,25 @@ import time
 
 
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
-HOOK_SCRIPT = os.path.join(os.path.dirname(__file__), "hooks", "on-stop.sh")
+HOOK_SOURCE = os.path.join(os.path.dirname(__file__), "hooks", "on-stop.sh")
+HOOK_INSTALL_DIR = os.path.expanduser("~/.claude/hooks")
+HOOK_INSTALLED_PATH = os.path.join(HOOK_INSTALL_DIR, "claude-tmux-on-stop.sh")
 SIGNAL_DIR = "/tmp/claude-tmux"
 CLAUDE_SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 SESSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
-REQUIRED_COMMANDS = ["tmux", "osascript", "claude"]
+BASE_COMMANDS = ["tmux", "claude"]
+GUI_COMMANDS = ["osascript"]
 MAX_CAPTURE_LINES = 10000
 
+COMMANDS_NEEDING_GUI = {"start"}
 
-def preflight_check() -> None:
-    missing = [cmd for cmd in REQUIRED_COMMANDS if not shutil.which(cmd)]
+
+def preflight_check(command: str) -> None:
+    required = list(BASE_COMMANDS)
+    if command in COMMANDS_NEEDING_GUI:
+        required.extend(GUI_COMMANDS)
+
+    missing = [cmd for cmd in required if not shutil.which(cmd)]
     if missing:
         print(f"Error: missing required commands: {', '.join(missing)}")
         print("Install them before running:")
@@ -308,9 +317,34 @@ def cmd_unsave(args: argparse.Namespace) -> None:
     print(f"Removed '{args.name}'.")
 
 
+def _atomic_write_json(path: str, data: dict) -> None:
+    dir_path = os.path.dirname(path)
+    os.makedirs(dir_path, exist_ok=True)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:
+            json.dump(data, tmp, indent=2)
+            tmp_path = tmp.name
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+
+def _install_hook_script() -> None:
+    if not os.path.isfile(HOOK_SOURCE):
+        print(f"Error: hook script not found at {HOOK_SOURCE}")
+        raise SystemExit(1)
+
+    os.makedirs(HOOK_INSTALL_DIR, exist_ok=True)
+    shutil.copy2(HOOK_SOURCE, HOOK_INSTALLED_PATH)
+    os.chmod(HOOK_INSTALLED_PATH, 0o755)
+
+
 def cmd_setup_hooks(args: argparse.Namespace) -> None:
-    if not os.path.isfile(HOOK_SCRIPT):
-        print(f"Error: hook script not found at {HOOK_SCRIPT}")
+    if not os.path.isfile(HOOK_SOURCE):
+        print(f"Error: hook script not found at {HOOK_SOURCE}")
         raise SystemExit(1)
 
     if not shutil.which("jq"):
@@ -323,13 +357,15 @@ def cmd_setup_hooks(args: argparse.Namespace) -> None:
             try:
                 settings = json.load(f)
             except json.JSONDecodeError:
-                settings = {}
+                print(f"Error: {CLAUDE_SETTINGS_PATH} contains invalid JSON.")
+                print("Fix or back up the file before running setup-hooks.")
+                raise SystemExit(1)
 
     hook_entry = {
         "hooks": [
             {
                 "type": "command",
-                "command": HOOK_SCRIPT,
+                "command": HOOK_INSTALLED_PATH,
                 "timeout": 30,
             }
         ]
@@ -339,24 +375,25 @@ def cmd_setup_hooks(args: argparse.Namespace) -> None:
     stop_hooks = hooks.get("Stop", [])
 
     already_installed = any(
-        any(h.get("command") == HOOK_SCRIPT for h in entry.get("hooks", []))
+        any(h.get("command") == HOOK_INSTALLED_PATH for h in entry.get("hooks", []))
         for entry in stop_hooks
     )
 
     if already_installed:
-        print("Hooks already configured.")
+        # Update the script in case it changed
+        _install_hook_script()
+        print("Hooks already configured. Script updated.")
         return
 
+    _install_hook_script()
     stop_hooks.append(hook_entry)
     hooks["Stop"] = stop_hooks
     settings["hooks"] = hooks
 
-    os.makedirs(os.path.dirname(CLAUDE_SETTINGS_PATH), exist_ok=True)
-    with open(CLAUDE_SETTINGS_PATH, "w") as f:
-        json.dump(settings, f, indent=2)
+    _atomic_write_json(CLAUDE_SETTINGS_PATH, settings)
 
     print(f"Stop hook installed in {CLAUDE_SETTINGS_PATH}")
-    print(f"Script: {HOOK_SCRIPT}")
+    print(f"Script: {HOOK_INSTALLED_PATH}")
     print(f"Signals will be written to {SIGNAL_DIR}/")
 
 
@@ -369,15 +406,16 @@ def cmd_remove_hooks(args: argparse.Namespace) -> None:
         try:
             settings = json.load(f)
         except json.JSONDecodeError:
-            print("Settings file is corrupt.")
-            return
+            print(f"Error: {CLAUDE_SETTINGS_PATH} contains invalid JSON.")
+            print("Fix or back up the file before running remove-hooks.")
+            raise SystemExit(1)
 
     hooks = settings.get("hooks", {})
     stop_hooks = hooks.get("Stop", [])
 
     filtered = [
         entry for entry in stop_hooks
-        if not any(h.get("command") == HOOK_SCRIPT for h in entry.get("hooks", []))
+        if not any(h.get("command") == HOOK_INSTALLED_PATH for h in entry.get("hooks", []))
     ]
 
     if len(filtered) == len(stop_hooks):
@@ -394,52 +432,81 @@ def cmd_remove_hooks(args: argparse.Namespace) -> None:
     else:
         del settings["hooks"]
 
-    with open(CLAUDE_SETTINGS_PATH, "w") as f:
-        json.dump(settings, f, indent=2)
+    _atomic_write_json(CLAUDE_SETTINGS_PATH, settings)
+
+    if os.path.exists(HOOK_INSTALLED_PATH):
+        os.unlink(HOOK_INSTALLED_PATH)
 
     print("Stop hook removed.")
 
 
+def _atomic_consume(signal_path: str) -> dict | None:
+    """Atomically rename the signal file before reading to avoid race conditions."""
+    consumed_path = signal_path + ".consumed"
+    try:
+        os.rename(signal_path, consumed_path)
+    except FileNotFoundError:
+        return None
+    try:
+        with open(consumed_path) as f:
+            data = json.load(f)
+        os.unlink(consumed_path)
+        return data
+    except (json.JSONDecodeError, OSError):
+        os.unlink(consumed_path)
+        return None
+
+
 def read_signal(session_id: str) -> dict | None:
     signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
-    if not os.path.exists(signal_path):
+    try:
+        with open(signal_path) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
         return None
-    with open(signal_path) as f:
-        return json.load(f)
 
 
 def consume_signal(session_id: str) -> dict | None:
     signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
-    if not os.path.exists(signal_path):
-        return None
-    with open(signal_path) as f:
-        data = json.load(f)
-    os.unlink(signal_path)
-    return data
+    return _atomic_consume(signal_path)
+
+
+def _print_signal(data: dict) -> None:
+    session_id = data.get("session_id", "unknown")
+    print(f"\nSession completed: {session_id}")
+    print(f"  Transcript: {data.get('transcript_path', 'N/A')}")
+    print(f"  CWD: {data.get('cwd', 'N/A')}")
+    print(f"  Completed at: {data.get('completed_at', 'N/A')}")
 
 
 def cmd_wait(args: argparse.Namespace) -> None:
     timeout = args.timeout
     interval = args.interval
+    session_filter = args.session
     elapsed: float = 0
 
-    print(f"Waiting for any Claude session to complete (timeout: {timeout}s)...")
+    if session_filter:
+        print(f"Waiting for session '{session_filter}' to complete (timeout: {timeout}s)...")
+    else:
+        print(f"Waiting for any Claude session to complete (timeout: {timeout}s)...")
 
     while elapsed < timeout:
         signals = glob.glob(os.path.join(SIGNAL_DIR, "*.json"))
-        if signals:
-            for signal_path in signals:
-                with open(signal_path) as f:
-                    try:
-                        data = json.load(f)
-                    except json.JSONDecodeError:
-                        continue
-                session_id = data.get("session_id", "unknown")
-                print(f"\nSession completed: {session_id}")
-                print(f"  Transcript: {data.get('transcript_path', 'N/A')}")
-                print(f"  CWD: {data.get('cwd', 'N/A')}")
-                print(f"  Completed at: {data.get('completed_at', 'N/A')}")
-                os.unlink(signal_path)
+        for signal_path in signals:
+            data = _atomic_consume(signal_path)
+            if data is None:
+                continue
+
+            if session_filter and data.get("session_id") != session_filter:
+                # Not ours — restore the signal for other consumers
+                restored_path = os.path.join(
+                    SIGNAL_DIR, f"{data['session_id']}.json"
+                )
+                with open(restored_path, "w") as f:
+                    json.dump(data, f)
+                continue
+
+            _print_signal(data)
             return
 
         time.sleep(interval)
@@ -525,6 +592,11 @@ def main() -> None:
 
     wait_parser = subparsers.add_parser("wait", help="Wait for a session to complete")
     wait_parser.add_argument(
+        "--session",
+        default=None,
+        help="Only wait for this specific session (default: any)",
+    )
+    wait_parser.add_argument(
         "--timeout",
         type=int,
         default=300,
@@ -539,7 +611,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    preflight_check()
+    preflight_check(args.command)
 
     if args.command == "start":
         cmd_start(args)
