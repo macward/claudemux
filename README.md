@@ -51,7 +51,7 @@ claudemux start --saved my-project
 
 ### save / saved / unsave
 
-Bookmark sessions (name + path) for quick reuse. Stored in `sessions.json`.
+Bookmark sessions (name + path) for quick reuse. Stored in `~/.claudemux/sessions.json`.
 
 ```bash
 # Save a session
@@ -87,8 +87,8 @@ claudemux send my-session "/init"
 Capture the current output from a session (uses `tmux capture-pane`).
 
 ```bash
-claudemux read <session-name>
-claudemux read <session-name> --lines 500
+claudemux read my-session
+claudemux read my-session --lines 500
 ```
 
 ### kill
@@ -96,7 +96,7 @@ claudemux read <session-name> --lines 500
 Kill a tmux session.
 
 ```bash
-claudemux kill <session-name>
+claudemux kill my-session
 ```
 
 ## Hooks
