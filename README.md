@@ -1,15 +1,15 @@
 # claudemux
 
-CLI tool to launch and interact with Claude Code sessions remotely via tmux + iTerm2.
+CLI tool to launch and interact with Claude Code sessions remotely via tmux.
 
 ## Requirements
 
 - macOS
-- [iTerm2](https://iterm2.com/)
 - tmux (`brew install tmux`)
 - jq (`brew install jq`) — required for hooks
 - [Claude Code CLI](https://claude.ai/code) (`claude` in PATH)
 - [uv](https://docs.astral.sh/uv/)
+- One of: [iTerm2](https://iterm2.com/), [Ghostty](https://ghostty.org/), or Terminal.app (built-in)
 
 ## Install
 
@@ -31,10 +31,10 @@ uv tool uninstall claudemux
 
 ### start
 
-Launch a new Claude Code session in iTerm2 via tmux.
+Launch a new Claude Code session via tmux. Auto-detects your terminal (iTerm2 > Ghostty > Terminal.app).
 
 ```bash
-# Basic (random session name, current directory)
+# Basic (random session name, auto-detect terminal)
 claudemux start
 
 # With a working directory
@@ -43,15 +43,26 @@ claudemux start ~/Developer/myproject
 # With a custom name
 claudemux start ~/Developer/myproject --name my-session
 
+# Force a specific terminal
+claudemux start ~/Developer/myproject --terminal ghostty
+
 # With a layout
 claudemux start ~/Developer/myproject --layout split-right
 
-# Detached (no iTerm2, just tmux session)
+# Detached (no terminal, just tmux session)
 claudemux start ~/Developer/myproject --name worker --detach
 
 # From a saved session
 claudemux start --saved my-project
 ```
+
+**Terminals:**
+
+| Terminal | Layouts supported |
+|---|---|
+| `iterm2` | single, split-right, split-bottom, three-pane |
+| `ghostty` | single, split-right, split-bottom, three-pane |
+| `terminal` | single only (Terminal.app has no split support) |
 
 **Layouts:**
 

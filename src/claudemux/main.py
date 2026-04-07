@@ -98,80 +98,158 @@ def create_tmux_session_with_claude(session_name: str, working_dir: str | None =
     subprocess.run(cmd, check=True, timeout=30)
 
 
-def _get_or_create_window_script() -> str:
-    """AppleScript snippet that sets `targetWindow` to an existing window or creates one."""
-    return """
-        set windowCount to count of windows
-        if windowCount > 0 then
-            set targetWindow to current window
-        else
-            set targetWindow to (create window with default profile)
-        end if
-    """
+ITERM2_WINDOW_SCRIPT = """
+    set windowCount to count of windows
+    if windowCount > 0 then
+        set targetWindow to current window
+    else
+        set targetWindow to (create window with default profile)
+    end if
+"""
 
-
-LAYOUTS = {
-    "single": """
-    tell application "iTerm2"
-        activate
-        {get_window}
-        tell current session of targetWindow
-            write text "tmux attach-session -t {session_name}"
+TERMINAL_ADAPTERS: dict[str, dict[str, str]] = {
+    "iterm2": {
+        "single": """
+        tell application "iTerm2"
+            activate
+            {get_window}
+            tell current session of targetWindow
+                write text "tmux attach-session -t {session_name}"
+            end tell
         end tell
-    end tell
-    """,
-    "split-right": """
-    tell application "iTerm2"
-        activate
-        {get_window}
-        tell current session of targetWindow
-            write text "tmux attach-session -t {session_name}"
-            set logPane to (split vertically with default profile)
+        """,
+        "split-right": """
+        tell application "iTerm2"
+            activate
+            {get_window}
+            tell current session of targetWindow
+                write text "tmux attach-session -t {session_name}"
+                set logPane to (split vertically with default profile)
+            end tell
+            tell logPane
+                write text "echo '-- Log pane ready --'"
+            end tell
         end tell
-        tell logPane
-            write text "echo '-- Log pane ready --'"
+        """,
+        "split-bottom": """
+        tell application "iTerm2"
+            activate
+            {get_window}
+            tell current session of targetWindow
+                write text "tmux attach-session -t {session_name}"
+                set logPane to (split horizontally with default profile)
+            end tell
+            tell logPane
+                write text "echo '-- Log pane ready --'"
+            end tell
         end tell
-    end tell
-    """,
-    "split-bottom": """
-    tell application "iTerm2"
-        activate
-        {get_window}
-        tell current session of targetWindow
-            write text "tmux attach-session -t {session_name}"
-            set logPane to (split horizontally with default profile)
+        """,
+        "three-pane": """
+        tell application "iTerm2"
+            activate
+            {get_window}
+            tell current session of targetWindow
+                write text "tmux attach-session -t {session_name}"
+                set rightPane to (split vertically with default profile)
+            end tell
+            tell rightPane
+                write text "echo '-- Right pane ready --'"
+                set bottomPane to (split horizontally with default profile)
+            end tell
+            tell bottomPane
+                write text "echo '-- Bottom-right pane ready --'"
+            end tell
         end tell
-        tell logPane
-            write text "echo '-- Log pane ready --'"
+        """,
+    },
+    "ghostty": {
+        "single": """
+        tell application "Ghostty"
+            activate
+            create new window with command "tmux attach-session -t {session_name}"
         end tell
-    end tell
-    """,
-    "three-pane": """
-    tell application "iTerm2"
-        activate
-        {get_window}
-        tell current session of targetWindow
-            write text "tmux attach-session -t {session_name}"
-            set rightPane to (split vertically with default profile)
+        """,
+        "split-right": """
+        tell application "Ghostty"
+            activate
+            create new window with command "tmux attach-session -t {session_name}"
+            delay 0.5
+            tell front window
+                tell front tab
+                    split right
+                end tell
+            end tell
         end tell
-        tell rightPane
-            write text "echo '-- Right pane ready --'"
-            set bottomPane to (split horizontally with default profile)
+        """,
+        "split-bottom": """
+        tell application "Ghostty"
+            activate
+            create new window with command "tmux attach-session -t {session_name}"
+            delay 0.5
+            tell front window
+                tell front tab
+                    split down
+                end tell
+            end tell
         end tell
-        tell bottomPane
-            write text "echo '-- Bottom-right pane ready --'"
+        """,
+        "three-pane": """
+        tell application "Ghostty"
+            activate
+            create new window with command "tmux attach-session -t {session_name}"
+            delay 0.5
+            tell front window
+                tell front tab
+                    split right
+                    delay 0.3
+                    split down
+                end tell
+            end tell
         end tell
-    end tell
-    """,
+        """,
+    },
+    "terminal": {
+        "single": """
+        tell application "Terminal"
+            activate
+            if not (exists window 1) then reopen
+            do script "tmux attach-session -t {session_name}" in front window
+        end tell
+        """,
+    },
 }
 
+ALL_LAYOUTS = {"single", "split-right", "split-bottom", "three-pane"}
+SUPPORTED_TERMINALS = list(TERMINAL_ADAPTERS.keys())
 
-def open_iterm_with_tmux(session_name: str, layout: str = "single") -> None:
+
+def detect_terminal() -> str:
+    app_checks = [
+        ("iterm2", "/Applications/iTerm.app"),
+        ("ghostty", "/Applications/Ghostty.app"),
+    ]
+    for name, path in app_checks:
+        if os.path.exists(path):
+            return name
+    return "terminal"
+
+
+def open_terminal_with_tmux(session_name: str, layout: str = "single", terminal: str | None = None) -> None:
     validate_session_name(session_name)
-    template = LAYOUTS[layout]
+
+    if terminal is None:
+        terminal = detect_terminal()
+
+    adapter = TERMINAL_ADAPTERS[terminal]
+
+    if layout not in adapter:
+        print(f"Warning: '{terminal}' does not support layout '{layout}'. Using 'single'.")
+        layout = "single"
+
+    template = adapter[layout]
     applescript = template.format(
         session_name=session_name,
-        get_window=_get_or_create_window_script(),
+        get_window=ITERM2_WINDOW_SCRIPT if terminal == "iterm2" else "",
     )
     subprocess.run(["osascript", "-e", applescript], check=True, timeout=30)
 
@@ -232,8 +310,9 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"Session '{session_name}' created (detached).")
         return
 
-    print(f"Opening iTerm2 with layout '{layout}'...")
-    open_iterm_with_tmux(session_name, layout)
+    terminal = args.terminal if args.terminal else detect_terminal()
+    print(f"Opening {terminal} with layout '{layout}'...")
+    open_terminal_with_tmux(session_name, layout, terminal)
     print("Done.")
 
 
@@ -537,7 +616,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="tmux + Claude Code launcher")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    start_parser = subparsers.add_parser("start", help="Launch iTerm2 + tmux + Claude Code")
+    start_parser = subparsers.add_parser("start", help="Launch terminal + tmux + Claude Code")
     start_parser.add_argument(
         "path",
         nargs="?",
@@ -555,15 +634,21 @@ def main() -> None:
         help="Use a saved session (name + path)",
     )
     start_parser.add_argument(
+        "--terminal",
+        default=None,
+        choices=SUPPORTED_TERMINALS,
+        help="Terminal to use (default: auto-detect)",
+    )
+    start_parser.add_argument(
         "--layout",
         default="single",
-        choices=LAYOUTS.keys(),
-        help="iTerm2 pane layout (default: single)",
+        choices=ALL_LAYOUTS,
+        help="Pane layout (default: single)",
     )
     start_parser.add_argument(
         "--detach",
         action="store_true",
-        help="Create tmux session without opening iTerm2",
+        help="Create tmux session without opening a terminal",
     )
 
     save_parser = subparsers.add_parser("save", help="Save a session name + path")
