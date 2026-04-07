@@ -16,12 +16,13 @@ Python CLI tool for launching, managing, and interacting with Claude Code sessio
 ## Build & Run
 
 ```bash
-uv sync                              # Install dependencies
-uv run python main.py start          # Launch a session
-uv run python main.py send <s> "hi"  # Send prompt
-uv run python main.py read <s>       # Read output
-uv run python main.py list           # List sessions
-uv run python main.py kill <s>       # Kill a session
+uv sync                      # Install dependencies
+uv tool install .            # Install as global CLI command
+claudemux start              # Launch a session
+claudemux send <s> "hi"     # Send prompt
+claudemux read <s>           # Read output
+claudemux list               # List sessions
+claudemux kill <s>           # Kill a session
 ```
 
 ## Architecture

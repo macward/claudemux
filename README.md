@@ -1,4 +1,4 @@
-# claude-tmux
+# claudemux
 
 CLI tool to launch and interact with Claude Code sessions remotely via tmux + iTerm2.
 
@@ -14,7 +14,8 @@ CLI tool to launch and interact with Claude Code sessions remotely via tmux + iT
 ## Setup
 
 ```bash
-uv sync
+uv sync              # Install dependencies
+uv tool install .    # Install as global CLI command
 ```
 
 ## Commands
@@ -25,22 +26,22 @@ Launch a new Claude Code session in iTerm2 via tmux.
 
 ```bash
 # Basic (random session name, current directory)
-uv run python main.py start
+claudemux start
 
 # With a working directory
-uv run python main.py start ~/Developer/myproject
+claudemux start ~/Developer/myproject
 
 # With a custom name
-uv run python main.py start ~/Developer/myproject --name my-session
+claudemux start ~/Developer/myproject --name my-session
 
 # With a layout
-uv run python main.py start ~/Developer/myproject --layout split-right
+claudemux start ~/Developer/myproject --layout split-right
 
 # Detached (no iTerm2, just tmux session)
-uv run python main.py start ~/Developer/myproject --name worker --detach
+claudemux start ~/Developer/myproject --name worker --detach
 
 # From a saved session
-uv run python main.py start --saved my-project
+claudemux start --saved my-project
 ```
 
 **Layouts:**
@@ -58,13 +59,13 @@ Bookmark sessions (name + path) for quick reuse. Stored in `sessions.json`.
 
 ```bash
 # Save a session
-uv run python main.py save my-project ~/Developer/myproject
+claudemux save my-project ~/Developer/myproject
 
 # List saved sessions
-uv run python main.py saved
+claudemux saved
 
 # Remove a saved session
-uv run python main.py unsave my-project
+claudemux unsave my-project
 ```
 
 ### list
@@ -72,7 +73,7 @@ uv run python main.py unsave my-project
 Show all active tmux sessions.
 
 ```bash
-uv run python main.py list
+claudemux list
 ```
 
 ### send
@@ -80,7 +81,7 @@ uv run python main.py list
 Send a prompt to a running Claude Code session.
 
 ```bash
-uv run python main.py send <session-name> "your prompt here"
+claudemux send <session-name> "your prompt here"
 ```
 
 ### read
@@ -88,8 +89,8 @@ uv run python main.py send <session-name> "your prompt here"
 Capture the current output from a session (uses `tmux capture-pane`).
 
 ```bash
-uv run python main.py read <session-name>
-uv run python main.py read <session-name> --lines 500
+claudemux read <session-name>
+claudemux read <session-name> --lines 500
 ```
 
 ### kill
@@ -97,7 +98,7 @@ uv run python main.py read <session-name> --lines 500
 Kill a tmux session.
 
 ```bash
-uv run python main.py kill <session-name>
+claudemux kill <session-name>
 ```
 
 ## Hooks
@@ -110,10 +111,10 @@ Install or remove the Stop hook in `~/.claude/settings.json`.
 
 ```bash
 # Install
-uv run python main.py setup-hooks
+claudemux setup-hooks
 
 # Remove
-uv run python main.py remove-hooks
+claudemux remove-hooks
 ```
 
 When installed, Claude Code writes a signal file to `/tmp/claude-tmux/<session-id>.json` every time it finishes responding. The signal contains `session_id`, `transcript_path`, `cwd`, and `completed_at`.
@@ -124,19 +125,19 @@ Block until a session completes (reads the signal file).
 
 ```bash
 # Wait up to 5 minutes (default)
-uv run python main.py wait
+claudemux wait
 
 # Custom timeout
-uv run python main.py wait --timeout 60 --interval 0.5
+claudemux wait --timeout 60 --interval 0.5
 ```
 
 ### Typical agent workflow
 
 ```bash
-uv run python main.py setup-hooks                          # once
-uv run python main.py start ~/myproject --name task1 --detach
-uv run python main.py send task1 "fix the failing tests"
-uv run python main.py wait --timeout 120                    # blocks until done
+claudemux setup-hooks                          # once
+claudemux start ~/myproject --name task1 --detach
+claudemux send task1 "fix the failing tests"
+claudemux wait --timeout 120                    # blocks until done
 ```
 
 ## How it works
