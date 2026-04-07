@@ -11,16 +11,18 @@ mkdir -p "$SIGNAL_DIR"
 
 INPUT=$(cat)
 
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
+eval "$(echo "$INPUT" | jq -r '@sh "SESSION_ID=\(.session_id) TRANSCRIPT_PATH=\(.transcript_path) CWD=\(.cwd)"')"
 SESSION_NAME="${CLAUDEMUX_SESSION:-$SESSION_ID}"
+
+if [[ -z "$SESSION_ID" ]]; then
+    echo "Error: missing session_id in hook input" >&2
+    exit 1
+fi
 
 if [[ ! "$SESSION_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
     echo "Error: invalid session name '$SESSION_NAME'" >&2
     exit 1
 fi
-
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path')
-CWD=$(echo "$INPUT" | jq -r '.cwd')
 
 TMPFILE=$(mktemp "${SIGNAL_DIR}/${SESSION_NAME}.XXXXXX.tmp")
 

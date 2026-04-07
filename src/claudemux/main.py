@@ -218,12 +218,16 @@ def open_terminal_with_tmux(session_name: str, layout: str = "single", terminal:
 
 
 def capture_pane(session_name: str, lines: int = 200) -> str:
-    result = subprocess.run(
-        ["tmux", "capture-pane", "-t", _tmux_target(session_name), "-p", "-S", f"-{lines}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", _tmux_target(session_name), "-p", "-S", f"-{lines}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        print(f"Error: failed to capture pane for session '{session_name}'. Session may have ended.")
+        raise SystemExit(1)
     return result.stdout.rstrip("\n")
 
 
@@ -525,10 +529,12 @@ def cmd_wait(args: argparse.Namespace) -> None:
     timeout = args.timeout
     interval = args.interval
     session_filter = args.session
+    if session_filter:
+        validate_session_name(session_filter)
     deadline = time.monotonic() + timeout
 
     if args.clean:
-        stale = glob.glob(os.path.join(SIGNAL_DIR, "*.json"))
+        stale = glob.glob(os.path.join(SIGNAL_DIR, "*.json")) + glob.glob(os.path.join(SIGNAL_DIR, "*.consumed"))
         for f in stale:
             try:
                 os.unlink(f)
