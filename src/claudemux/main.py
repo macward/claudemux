@@ -20,19 +20,12 @@ HOOK_INSTALLED_PATH = os.path.join(HOOK_INSTALL_DIR, "claude-tmux-on-stop.sh")
 SIGNAL_DIR = "/tmp/claude-tmux"
 CLAUDE_SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 SESSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
-BASE_COMMANDS = ["tmux", "claude"]
-GUI_COMMANDS = ["osascript"]
+REQUIRED_COMMANDS = ["tmux", "claude"]
 MAX_CAPTURE_LINES = 10000
 
-COMMANDS_NEEDING_GUI = {"start"}
 
-
-def preflight_check(command: str) -> None:
-    required = list(BASE_COMMANDS)
-    if command in COMMANDS_NEEDING_GUI:
-        required.extend(GUI_COMMANDS)
-
-    missing = [cmd for cmd in required if not shutil.which(cmd)]
+def preflight_check() -> None:
+    missing = [cmd for cmd in REQUIRED_COMMANDS if not shutil.which(cmd)]
     if missing:
         print(f"Error: missing required commands: {', '.join(missing)}")
         print("Install them before running:")
@@ -41,8 +34,6 @@ def preflight_check(command: str) -> None:
                 print("  brew install tmux")
             elif cmd == "claude":
                 print("  See https://claude.ai/code")
-            elif cmd == "osascript":
-                print("  osascript is part of macOS — are you running on macOS?")
         raise SystemExit(1)
 
 
@@ -98,134 +89,9 @@ def create_tmux_session_with_claude(session_name: str, working_dir: str | None =
     subprocess.run(cmd, check=True, timeout=30)
 
 
-ITERM2_WINDOW_SCRIPT = """
-    set targetWindow to (create window with default profile)
-"""
-
-TERMINAL_ADAPTERS: dict[str, dict[str, str]] = {
-    "iterm2": {
-        "single": """
-        tell application "iTerm2"
-            activate
-            {get_window}
-            tell current session of targetWindow
-                write text "tmux attach-session -t {session_name}"
-            end tell
-        end tell
-        """,
-        "split-right": """
-        tell application "iTerm2"
-            activate
-            {get_window}
-            tell current session of targetWindow
-                write text "tmux attach-session -t {session_name}"
-                set logPane to (split vertically with default profile)
-            end tell
-            tell logPane
-                write text "echo '-- Log pane ready --'"
-            end tell
-        end tell
-        """,
-        "split-bottom": """
-        tell application "iTerm2"
-            activate
-            {get_window}
-            tell current session of targetWindow
-                write text "tmux attach-session -t {session_name}"
-                set logPane to (split horizontally with default profile)
-            end tell
-            tell logPane
-                write text "echo '-- Log pane ready --'"
-            end tell
-        end tell
-        """,
-        "three-pane": """
-        tell application "iTerm2"
-            activate
-            {get_window}
-            tell current session of targetWindow
-                write text "tmux attach-session -t {session_name}"
-                set rightPane to (split vertically with default profile)
-            end tell
-            tell rightPane
-                write text "echo '-- Right pane ready --'"
-                set bottomPane to (split horizontally with default profile)
-            end tell
-            tell bottomPane
-                write text "echo '-- Bottom-right pane ready --'"
-            end tell
-        end tell
-        """,
-    },
-    "ghostty": {},
-    "terminal": {
-        "single": """
-        tell application "Terminal"
-            activate
-            do script "tmux attach-session -t {session_name}"
-        end tell
-        """,
-    },
-}
-
-ALL_LAYOUTS = ["single", "split-right", "split-bottom", "three-pane"]
-SUPPORTED_TERMINALS = list(TERMINAL_ADAPTERS.keys())
-
-
-def detect_terminal() -> str:
-    term_program = os.environ.get("TERM_PROGRAM", "")
-    mapping = {
-        "iTerm.app": "iterm2",
-        "ghostty": "ghostty",
-        "Apple_Terminal": "terminal",
-    }
-    if term_program in mapping:
-        return mapping[term_program]
-
-    # Fallback: check installed apps
-    app_checks = [
-        ("iterm2", "iTerm.app"),
-        ("ghostty", "Ghostty.app"),
-    ]
-    search_dirs = ["/Applications", os.path.expanduser("~/Applications")]
-    for name, app in app_checks:
-        for search_dir in search_dirs:
-            if os.path.exists(os.path.join(search_dir, app)):
-                return name
-    return "terminal"
-
-
-def _open_ghostty(session_name: str) -> None:
-    subprocess.run(
-        ["open", "-na", "Ghostty.app", "--args", "-e", f"tmux attach-session -t {session_name}"],
-        check=True, timeout=30,
-    )
-
-
-def open_terminal_with_tmux(session_name: str, layout: str = "single", terminal: str | None = None) -> None:
+def attach_session(session_name: str) -> None:
     validate_session_name(session_name)
-
-    if terminal is None:
-        terminal = detect_terminal()
-
-    if terminal == "ghostty":
-        if layout != "single":
-            print(f"Warning: 'ghostty' does not support layout '{layout}'. Using 'single'.")
-        _open_ghostty(session_name)
-        return
-
-    adapter = TERMINAL_ADAPTERS[terminal]
-
-    if layout not in adapter:
-        print(f"Warning: '{terminal}' does not support layout '{layout}'. Using 'single'.")
-        layout = "single"
-
-    template = adapter[layout]
-    subs = {"session_name": session_name}
-    if terminal == "iterm2":
-        subs["get_window"] = ITERM2_WINDOW_SCRIPT
-    applescript = template.format_map(subs)
-    subprocess.run(["osascript", "-e", applescript], check=True, timeout=30)
+    os.execvp("tmux", ["tmux", "attach-session", "-t", f"={session_name}"])
 
 
 def capture_pane(session_name: str, lines: int = 200) -> str:
@@ -274,8 +140,6 @@ def cmd_start(args: argparse.Namespace) -> None:
         session_name = validate_session_name(args.name) if args.name else generate_session_name()
         working_dir = args.path
 
-    layout = args.layout
-
     if is_tmux_session_alive(session_name):
         print(f"Session '{session_name}' already exists, attaching...")
     else:
@@ -288,13 +152,7 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"Session '{session_name}' created (detached).")
         return
 
-    if args.here:
-        os.execvp("tmux", ["tmux", "attach-session", "-t", session_name])
-
-    terminal = args.terminal if args.terminal else detect_terminal()
-    print(f"Opening {terminal} with layout '{layout}'...")
-    open_terminal_with_tmux(session_name, layout, terminal)
-    print("Done.")
+    attach_session(session_name)
 
 
 def cmd_send(args: argparse.Namespace) -> None:
@@ -617,26 +475,9 @@ def main() -> None:
         help="Use a saved session (name + path)",
     )
     start_parser.add_argument(
-        "--terminal",
-        default=None,
-        choices=SUPPORTED_TERMINALS,
-        help="Terminal to use (default: auto-detect)",
-    )
-    start_parser.add_argument(
-        "--layout",
-        default="single",
-        choices=ALL_LAYOUTS,
-        help="Pane layout (default: single)",
-    )
-    start_parser.add_argument(
         "--detach",
         action="store_true",
-        help="Create tmux session without opening a terminal",
-    )
-    start_parser.add_argument(
-        "--here",
-        action="store_true",
-        help="Attach to the session in the current terminal instead of opening a new window",
+        help="Create tmux session without attaching",
     )
 
     save_parser = subparsers.add_parser("save", help="Save a session name + path")
@@ -695,7 +536,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    preflight_check(args.command)
+    preflight_check()
 
     if args.command == "start":
         cmd_start(args)

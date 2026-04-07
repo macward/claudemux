@@ -4,13 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Python CLI tool for launching, managing, and interacting with Claude Code sessions remotely via tmux + iTerm2 on macOS.
+Python CLI tool for launching, managing, and interacting with Claude Code sessions remotely via tmux.
 
 ## Tech Stack
 
 - Python 3.13+
 - tmux (via subprocess)
-- iTerm2 (via AppleScript/osascript)
 - uv for dependency management
 
 ## Build & Run
@@ -27,12 +26,13 @@ claudemux kill <s>           # Kill a session
 
 ## Architecture
 
-- Single-file CLI (`main.py`) using argparse subcommands
+- Single-file CLI (`src/claudemux/main.py`) using argparse subcommands
 - tmux is the communication channel: `send-keys -l` for input, `capture-pane` for output
-- iTerm2 is controlled via AppleScript templates (LAYOUTS dict)
-- Session bookmarks stored in `sessions.json` (atomic writes, validated names)
-- All tmux `-t` targets use `=name` for exact match (no fuzzy)
-- Session names validated to `[a-zA-Z0-9_-]` to prevent AppleScript injection
+- `start` attaches in current terminal via `os.execvp`, `--detach` skips attaching
+- Session bookmarks stored in `~/.claudemux/sessions.json` (atomic writes)
+- All tmux `-t` targets use `=name:0.0` for exact match (no fuzzy)
+- Session names validated to `[a-zA-Z0-9_-]`
+- Stop hook installed to `~/.claude/hooks/`, signals written to `/tmp/claude-tmux/`
 
 ## Conventions
 

@@ -4,12 +4,11 @@ CLI tool to launch and interact with Claude Code sessions remotely via tmux.
 
 ## Requirements
 
-- macOS
+- macOS / Linux
 - tmux (`brew install tmux`)
 - jq (`brew install jq`) — required for hooks
 - [Claude Code CLI](https://claude.ai/code) (`claude` in PATH)
 - [uv](https://docs.astral.sh/uv/)
-- One of: [iTerm2](https://iterm2.com/), [Ghostty](https://ghostty.org/), or Terminal.app (built-in)
 
 ## Install
 
@@ -31,10 +30,10 @@ uv tool uninstall claudemux
 
 ### start
 
-Launch a new Claude Code session via tmux. Auto-detects your terminal (iTerm2 > Ghostty > Terminal.app).
+Create a tmux session with Claude Code and attach to it in the current terminal.
 
 ```bash
-# Basic (random session name, auto-detect terminal)
+# Basic (random session name)
 claudemux start
 
 # With a working directory
@@ -43,35 +42,12 @@ claudemux start ~/Developer/myproject
 # With a custom name
 claudemux start ~/Developer/myproject --name my-session
 
-# Force a specific terminal
-claudemux start ~/Developer/myproject --terminal ghostty
-
-# With a layout
-claudemux start ~/Developer/myproject --layout split-right
-
-# Detached (no terminal, just tmux session)
+# Detached (create session without attaching)
 claudemux start ~/Developer/myproject --name worker --detach
 
 # From a saved session
 claudemux start --saved my-project
 ```
-
-**Terminals:**
-
-| Terminal | Layouts supported |
-|---|---|
-| `iterm2` | single, split-right, split-bottom, three-pane |
-| `ghostty` | single |
-| `terminal` | single |
-
-**Layouts:**
-
-| Layout | Description |
-|---|---|
-| `single` | Claude Code only (default) |
-| `split-right` | Claude Code left, log pane right |
-| `split-bottom` | Claude Code top, log pane bottom |
-| `three-pane` | Claude Code left, two panes stacked right |
 
 ### save / saved / unsave
 
@@ -172,7 +148,7 @@ claudemux kill task1                                         # cleanup
 
 ## How it works
 
-1. **start** creates a detached tmux session running `claude` and opens a terminal attached to it. Auto-detects iTerm2, Ghostty, or Terminal.app.
+1. **start** creates a tmux session running `claude` and attaches to it in the current terminal. Use `--detach` to skip attaching.
 2. **send** uses `tmux send-keys -l` to type text into the session as literal input.
 3. **read** uses `tmux capture-pane` to grab scrollback output.
 4. **wait** polls `/tmp/claude-tmux/` for signal files written by the Stop hook.
