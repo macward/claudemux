@@ -11,11 +11,16 @@ CLI tool to launch and interact with Claude Code sessions remotely via tmux + iT
 - [Claude Code CLI](https://claude.ai/code) (`claude` in PATH)
 - [uv](https://docs.astral.sh/uv/)
 
-## Setup
+## Install
 
 ```bash
-uv sync              # Install dependencies
-uv tool install .    # Install as global CLI command
+# From GitHub (recommended)
+uv tool install git+https://github.com/macward/claudemux.git
+
+# Or from local clone
+git clone git@github.com:macward/claudemux.git
+cd claudemux
+uv tool install .
 ```
 
 ## Commands
