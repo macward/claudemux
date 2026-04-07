@@ -65,18 +65,8 @@ def load_sessions() -> dict[str, str]:
 
 
 def save_sessions(sessions: dict[str, str]) -> None:
-    dir_path = os.path.dirname(SESSIONS_FILE)
-    os.makedirs(dir_path, exist_ok=True)
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:
-            json.dump(sessions, tmp, indent=2)
-            tmp_path = tmp.name
-        os.replace(tmp_path, SESSIONS_FILE)
-    except Exception:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+    os.makedirs(os.path.dirname(SESSIONS_FILE), exist_ok=True)
+    _atomic_write_json(SESSIONS_FILE, sessions)
 
 
 def generate_session_name() -> str:
@@ -105,7 +95,7 @@ def create_tmux_session_with_claude(session_name: str, working_dir: str | None =
             raise SystemExit(1)
         cmd.extend(["-c", resolved])
     cmd.append("claude")
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=30)
 
 
 def _get_or_create_window_script() -> str:
@@ -183,7 +173,7 @@ def open_iterm_with_tmux(session_name: str, layout: str = "single") -> None:
         session_name=session_name,
         get_window=_get_or_create_window_script(),
     )
-    subprocess.run(["osascript", "-e", applescript], check=True)
+    subprocess.run(["osascript", "-e", applescript], check=True, timeout=30)
 
 
 def capture_pane(session_name: str, lines: int = 200) -> str:
@@ -203,11 +193,11 @@ def send_prompt(session_name: str, prompt: str) -> None:
 
     subprocess.run(
         ["tmux", "send-keys", "-t", _tmux_target(session_name), "-l", prompt],
-        check=True,
+        check=True, timeout=10,
     )
     subprocess.run(
         ["tmux", "send-keys", "-t", _tmux_target(session_name), "Enter"],
-        check=True,
+        check=True, timeout=10,
     )
     print(f"Prompt sent to '{session_name}'.")
 
@@ -307,7 +297,7 @@ def cmd_kill(args: argparse.Namespace) -> None:
 
     subprocess.run(
         ["tmux", "kill-session", "-t", f"={args.session}"],
-        check=True,
+        check=True, timeout=10,
     )
     print(f"Session '{args.session}' killed.")
 
