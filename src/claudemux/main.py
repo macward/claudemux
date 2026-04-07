@@ -84,6 +84,10 @@ def generate_session_name() -> str:
     return f"claude-{suffix}"
 
 
+def _tmux_target(session_name: str) -> str:
+    return f"={session_name}:0.0"
+
+
 def is_tmux_session_alive(session_name: str) -> bool:
     result = subprocess.run(
         ["tmux", "has-session", "-t", f"={session_name}"],
@@ -184,7 +188,7 @@ def open_iterm_with_tmux(session_name: str, layout: str = "single") -> None:
 
 def capture_pane(session_name: str, lines: int = 200) -> str:
     result = subprocess.run(
-        ["tmux", "capture-pane", "-t", f"={session_name}", "-p", "-S", f"-{lines}"],
+        ["tmux", "capture-pane", "-t", _tmux_target(session_name), "-p", "-S", f"-{lines}"],
         capture_output=True,
         text=True,
         check=True,
@@ -198,11 +202,11 @@ def send_prompt(session_name: str, prompt: str) -> None:
         raise SystemExit(1)
 
     subprocess.run(
-        ["tmux", "send-keys", "-t", f"={session_name}", "-l", prompt],
+        ["tmux", "send-keys", "-t", _tmux_target(session_name), "-l", prompt],
         check=True,
     )
     subprocess.run(
-        ["tmux", "send-keys", "-t", f"={session_name}", "Enter"],
+        ["tmux", "send-keys", "-t", _tmux_target(session_name), "Enter"],
         check=True,
     )
     print(f"Prompt sent to '{session_name}'.")
