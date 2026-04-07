@@ -169,68 +169,31 @@ TERMINAL_ADAPTERS: dict[str, dict[str, str]] = {
             create new window with command "tmux attach-session -t {session_name}"
         end tell
         """,
-        "split-right": """
-        tell application "Ghostty"
-            activate
-            create new window with command "tmux attach-session -t {session_name}"
-            delay 0.5
-            tell front window
-                tell front tab
-                    split right
-                end tell
-            end tell
-        end tell
-        """,
-        "split-bottom": """
-        tell application "Ghostty"
-            activate
-            create new window with command "tmux attach-session -t {session_name}"
-            delay 0.5
-            tell front window
-                tell front tab
-                    split down
-                end tell
-            end tell
-        end tell
-        """,
-        "three-pane": """
-        tell application "Ghostty"
-            activate
-            create new window with command "tmux attach-session -t {session_name}"
-            delay 0.5
-            tell front window
-                tell front tab
-                    split right
-                    delay 0.3
-                    split down
-                end tell
-            end tell
-        end tell
-        """,
     },
     "terminal": {
         "single": """
         tell application "Terminal"
             activate
-            if not (exists window 1) then reopen
-            do script "tmux attach-session -t {session_name}" in front window
+            do script "tmux attach-session -t {session_name}"
         end tell
         """,
     },
 }
 
-ALL_LAYOUTS = {"single", "split-right", "split-bottom", "three-pane"}
+ALL_LAYOUTS = ["single", "split-right", "split-bottom", "three-pane"]
 SUPPORTED_TERMINALS = list(TERMINAL_ADAPTERS.keys())
 
 
 def detect_terminal() -> str:
     app_checks = [
-        ("iterm2", "/Applications/iTerm.app"),
-        ("ghostty", "/Applications/Ghostty.app"),
+        ("iterm2", "iTerm.app"),
+        ("ghostty", "Ghostty.app"),
     ]
-    for name, path in app_checks:
-        if os.path.exists(path):
-            return name
+    search_dirs = ["/Applications", os.path.expanduser("~/Applications")]
+    for name, app in app_checks:
+        for search_dir in search_dirs:
+            if os.path.exists(os.path.join(search_dir, app)):
+                return name
     return "terminal"
 
 
@@ -247,10 +210,10 @@ def open_terminal_with_tmux(session_name: str, layout: str = "single", terminal:
         layout = "single"
 
     template = adapter[layout]
-    applescript = template.format(
-        session_name=session_name,
-        get_window=ITERM2_WINDOW_SCRIPT if terminal == "iterm2" else "",
-    )
+    subs = {"session_name": session_name}
+    if terminal == "iterm2":
+        subs["get_window"] = ITERM2_WINDOW_SCRIPT
+    applescript = template.format_map(subs)
     subprocess.run(["osascript", "-e", applescript], check=True, timeout=30)
 
 

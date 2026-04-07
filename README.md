@@ -61,8 +61,8 @@ claudemux start --saved my-project
 | Terminal | Layouts supported |
 |---|---|
 | `iterm2` | single, split-right, split-bottom, three-pane |
-| `ghostty` | single, split-right, split-bottom, three-pane |
-| `terminal` | single only (Terminal.app has no split support) |
+| `ghostty` | single |
+| `terminal` | single |
 
 **Layouts:**
 
