@@ -1,4 +1,5 @@
 import argparse
+import glob
 import json
 import os
 import random
@@ -7,9 +8,13 @@ import shutil
 import string
 import subprocess
 import tempfile
+import time
 
 
 SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
+HOOK_SCRIPT = os.path.join(os.path.dirname(__file__), "hooks", "on-stop.sh")
+SIGNAL_DIR = "/tmp/claude-tmux"
+CLAUDE_SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 SESSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
 REQUIRED_COMMANDS = ["tmux", "osascript", "claude"]
 MAX_CAPTURE_LINES = 10000
@@ -303,6 +308,147 @@ def cmd_unsave(args: argparse.Namespace) -> None:
     print(f"Removed '{args.name}'.")
 
 
+def cmd_setup_hooks(args: argparse.Namespace) -> None:
+    if not os.path.isfile(HOOK_SCRIPT):
+        print(f"Error: hook script not found at {HOOK_SCRIPT}")
+        raise SystemExit(1)
+
+    if not shutil.which("jq"):
+        print("Error: jq is required for hooks. Install with: brew install jq")
+        raise SystemExit(1)
+
+    settings: dict = {}
+    if os.path.exists(CLAUDE_SETTINGS_PATH):
+        with open(CLAUDE_SETTINGS_PATH) as f:
+            try:
+                settings = json.load(f)
+            except json.JSONDecodeError:
+                settings = {}
+
+    hook_entry = {
+        "hooks": [
+            {
+                "type": "command",
+                "command": HOOK_SCRIPT,
+                "timeout": 30,
+            }
+        ]
+    }
+
+    hooks = settings.get("hooks", {})
+    stop_hooks = hooks.get("Stop", [])
+
+    already_installed = any(
+        any(h.get("command") == HOOK_SCRIPT for h in entry.get("hooks", []))
+        for entry in stop_hooks
+    )
+
+    if already_installed:
+        print("Hooks already configured.")
+        return
+
+    stop_hooks.append(hook_entry)
+    hooks["Stop"] = stop_hooks
+    settings["hooks"] = hooks
+
+    os.makedirs(os.path.dirname(CLAUDE_SETTINGS_PATH), exist_ok=True)
+    with open(CLAUDE_SETTINGS_PATH, "w") as f:
+        json.dump(settings, f, indent=2)
+
+    print(f"Stop hook installed in {CLAUDE_SETTINGS_PATH}")
+    print(f"Script: {HOOK_SCRIPT}")
+    print(f"Signals will be written to {SIGNAL_DIR}/")
+
+
+def cmd_remove_hooks(args: argparse.Namespace) -> None:
+    if not os.path.exists(CLAUDE_SETTINGS_PATH):
+        print("No Claude settings found.")
+        return
+
+    with open(CLAUDE_SETTINGS_PATH) as f:
+        try:
+            settings = json.load(f)
+        except json.JSONDecodeError:
+            print("Settings file is corrupt.")
+            return
+
+    hooks = settings.get("hooks", {})
+    stop_hooks = hooks.get("Stop", [])
+
+    filtered = [
+        entry for entry in stop_hooks
+        if not any(h.get("command") == HOOK_SCRIPT for h in entry.get("hooks", []))
+    ]
+
+    if len(filtered) == len(stop_hooks):
+        print("Hook not found in settings.")
+        return
+
+    if filtered:
+        hooks["Stop"] = filtered
+    else:
+        del hooks["Stop"]
+
+    if hooks:
+        settings["hooks"] = hooks
+    else:
+        del settings["hooks"]
+
+    with open(CLAUDE_SETTINGS_PATH, "w") as f:
+        json.dump(settings, f, indent=2)
+
+    print("Stop hook removed.")
+
+
+def read_signal(session_id: str) -> dict | None:
+    signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
+    if not os.path.exists(signal_path):
+        return None
+    with open(signal_path) as f:
+        return json.load(f)
+
+
+def consume_signal(session_id: str) -> dict | None:
+    signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
+    if not os.path.exists(signal_path):
+        return None
+    with open(signal_path) as f:
+        data = json.load(f)
+    os.unlink(signal_path)
+    return data
+
+
+def cmd_wait(args: argparse.Namespace) -> None:
+    timeout = args.timeout
+    interval = args.interval
+    elapsed: float = 0
+
+    print(f"Waiting for any Claude session to complete (timeout: {timeout}s)...")
+
+    while elapsed < timeout:
+        signals = glob.glob(os.path.join(SIGNAL_DIR, "*.json"))
+        if signals:
+            for signal_path in signals:
+                with open(signal_path) as f:
+                    try:
+                        data = json.load(f)
+                    except json.JSONDecodeError:
+                        continue
+                session_id = data.get("session_id", "unknown")
+                print(f"\nSession completed: {session_id}")
+                print(f"  Transcript: {data.get('transcript_path', 'N/A')}")
+                print(f"  CWD: {data.get('cwd', 'N/A')}")
+                print(f"  Completed at: {data.get('completed_at', 'N/A')}")
+                os.unlink(signal_path)
+            return
+
+        time.sleep(interval)
+        elapsed += interval
+
+    print(f"\nTimeout after {timeout}s — no completion signal received.")
+    raise SystemExit(1)
+
+
 def cmd_read(args: argparse.Namespace) -> None:
     validate_session_name(args.session)
     if not is_tmux_session_alive(args.session):
@@ -374,6 +520,23 @@ def main() -> None:
 
     subparsers.add_parser("list", help="List active tmux sessions")
 
+    subparsers.add_parser("setup-hooks", help="Install Stop hook in Claude settings")
+    subparsers.add_parser("remove-hooks", help="Remove Stop hook from Claude settings")
+
+    wait_parser = subparsers.add_parser("wait", help="Wait for a session to complete")
+    wait_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Max seconds to wait (default: 300)",
+    )
+    wait_parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Poll interval in seconds (default: 1.0)",
+    )
+
     args = parser.parse_args()
 
     preflight_check()
@@ -394,6 +557,12 @@ def main() -> None:
         cmd_unsave(args)
     elif args.command == "kill":
         cmd_kill(args)
+    elif args.command == "setup-hooks":
+        cmd_setup_hooks(args)
+    elif args.command == "remove-hooks":
+        cmd_remove_hooks(args)
+    elif args.command == "wait":
+        cmd_wait(args)
 
 
 if __name__ == "__main__":
