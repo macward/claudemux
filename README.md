@@ -139,7 +139,7 @@ claudemux setup-hooks
 claudemux remove-hooks
 ```
 
-When installed, Claude Code writes a signal file to `/tmp/claude-tmux/<session-id>.json` every time it finishes responding. The signal contains `session_id`, `transcript_path`, `cwd`, and `completed_at`.
+When installed, Claude Code writes a signal file to `/tmp/claude-tmux/<session-name>.json` every time a claudemux session finishes responding. The hook only fires for sessions created by claudemux (not regular Claude Code sessions). The signal contains `session_id`, `session_name`, `transcript_path`, `cwd`, and `completed_at`.
 
 ### wait
 
@@ -162,16 +162,18 @@ claudemux wait --clean
 ### Typical agent workflow
 
 ```bash
-claudemux setup-hooks                          # once
+claudemux setup-hooks                                        # once
 claudemux start ~/myproject --name task1 --detach
 claudemux send task1 "fix the failing tests"
-claudemux wait --timeout 120                    # blocks until done
+claudemux wait --session task1 --timeout 120                 # blocks until done
+claudemux read task1                                         # see what Claude did
+claudemux kill task1                                         # cleanup
 ```
 
 ## How it works
 
-1. **start** creates a detached tmux session running `claude` and opens iTerm2 attached to it. Reuses an existing iTerm2 window if one is open.
+1. **start** creates a detached tmux session running `claude` and opens a terminal attached to it. Auto-detects iTerm2, Ghostty, or Terminal.app.
 2. **send** uses `tmux send-keys -l` to type text into the session as literal input.
 3. **read** uses `tmux capture-pane` to grab scrollback output.
 4. **wait** polls `/tmp/claude-tmux/` for signal files written by the Stop hook.
-5. The **Stop hook** (`hooks/on-stop.sh`) runs when Claude finishes responding, writing session metadata to a JSON signal file.
+5. The **Stop hook** (`hooks/on-stop.sh`) runs only in claudemux sessions (via `CLAUDEMUX=1` env var), writing session metadata to a JSON signal file named after the tmux session.
