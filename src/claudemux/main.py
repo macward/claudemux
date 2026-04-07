@@ -157,14 +157,7 @@ TERMINAL_ADAPTERS: dict[str, dict[str, str]] = {
         end tell
         """,
     },
-    "ghostty": {
-        "single": """
-        tell application "Ghostty"
-            activate
-            create new window with command "tmux attach-session -t {session_name}"
-        end tell
-        """,
-    },
+    "ghostty": {},
     "terminal": {
         "single": """
         tell application "Terminal"
@@ -202,11 +195,24 @@ def detect_terminal() -> str:
     return "terminal"
 
 
+def _open_ghostty(session_name: str) -> None:
+    subprocess.run(
+        ["open", "-na", "Ghostty.app", "--args", "-e", f"tmux attach-session -t {session_name}"],
+        check=True, timeout=30,
+    )
+
+
 def open_terminal_with_tmux(session_name: str, layout: str = "single", terminal: str | None = None) -> None:
     validate_session_name(session_name)
 
     if terminal is None:
         terminal = detect_terminal()
+
+    if terminal == "ghostty":
+        if layout != "single":
+            print(f"Warning: 'ghostty' does not support layout '{layout}'. Using 'single'.")
+        _open_ghostty(session_name)
+        return
 
     adapter = TERMINAL_ADAPTERS[terminal]
 
