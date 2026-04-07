@@ -383,11 +383,6 @@ def _atomic_consume(signal_path: str) -> dict | None:
 
 
 
-def consume_signal(session_id: str) -> dict | None:
-    signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
-    return _atomic_consume(signal_path)
-
-
 def _print_signal(data: dict) -> None:
     name = data.get("session_name", data.get("session_id", "unknown"))
     print(f"\nSession completed: {name}")
@@ -456,7 +451,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="tmux + Claude Code launcher")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    start_parser = subparsers.add_parser("start", help="Launch terminal + tmux + Claude Code")
+    start_parser = subparsers.add_parser("start", help="Launch a Claude Code session via tmux")
     start_parser.add_argument(
         "path",
         nargs="?",
