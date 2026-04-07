@@ -11,7 +11,9 @@ mkdir -p "$SIGNAL_DIR"
 
 INPUT=$(cat)
 
-eval "$(echo "$INPUT" | jq -r '@sh "SESSION_ID=\(.session_id) TRANSCRIPT_PATH=\(.transcript_path) CWD=\(.cwd)"')"
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 SESSION_NAME="${CLAUDEMUX_SESSION:-$SESSION_ID}"
 
 if [[ -z "$SESSION_ID" ]]; then

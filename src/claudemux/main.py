@@ -20,12 +20,19 @@ HOOK_INSTALLED_PATH = os.path.join(HOOK_INSTALL_DIR, "claude-tmux-on-stop.sh")
 SIGNAL_DIR = "/tmp/claude-tmux"
 CLAUDE_SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 SESSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
-REQUIRED_COMMANDS = ["tmux", "claude"]
 MAX_CAPTURE_LINES = 10000
 
+COMMANDS_NEEDING_TMUX = {"start", "send", "read", "kill", "list", "wait"}
 
-def preflight_check() -> None:
-    missing = [cmd for cmd in REQUIRED_COMMANDS if not shutil.which(cmd)]
+
+def preflight_check(command: str) -> None:
+    required = []
+    if command in COMMANDS_NEEDING_TMUX:
+        required.append("tmux")
+    if command == "start":
+        required.append("claude")
+
+    missing = [cmd for cmd in required if not shutil.which(cmd)]
     if missing:
         print(f"Error: missing required commands: {', '.join(missing)}")
         print("Install them before running:")
@@ -375,14 +382,6 @@ def _atomic_consume(signal_path: str) -> dict | None:
     return data
 
 
-def read_signal(session_id: str) -> dict | None:
-    signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
-    try:
-        with open(signal_path) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
 
 def consume_signal(session_id: str) -> dict | None:
     signal_path = os.path.join(SIGNAL_DIR, f"{session_id}.json")
@@ -406,7 +405,7 @@ def cmd_wait(args: argparse.Namespace) -> None:
     deadline = time.monotonic() + timeout
 
     if args.clean:
-        stale = glob.glob(os.path.join(SIGNAL_DIR, "*.json")) + glob.glob(os.path.join(SIGNAL_DIR, "*.consumed"))
+        stale = glob.glob(os.path.join(SIGNAL_DIR, "*.json"))
         for f in stale:
             try:
                 os.unlink(f)
@@ -536,7 +535,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    preflight_check()
+    preflight_check(args.command)
 
     if args.command == "start":
         cmd_start(args)
