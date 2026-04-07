@@ -1,0 +1,400 @@
+import argparse
+import json
+import os
+import random
+import re
+import shutil
+import string
+import subprocess
+import tempfile
+
+
+SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
+SESSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
+REQUIRED_COMMANDS = ["tmux", "osascript", "claude"]
+MAX_CAPTURE_LINES = 10000
+
+
+def preflight_check() -> None:
+    missing = [cmd for cmd in REQUIRED_COMMANDS if not shutil.which(cmd)]
+    if missing:
+        print(f"Error: missing required commands: {', '.join(missing)}")
+        print("Install them before running:")
+        for cmd in missing:
+            if cmd == "tmux":
+                print("  brew install tmux")
+            elif cmd == "claude":
+                print("  See https://claude.ai/code")
+            elif cmd == "osascript":
+                print("  osascript is part of macOS — are you running on macOS?")
+        raise SystemExit(1)
+
+
+def validate_session_name(name: str) -> str:
+    if not SESSION_NAME_PATTERN.match(name):
+        print(f"Error: session name '{name}' contains invalid characters. Use only [a-zA-Z0-9_-].")
+        raise SystemExit(1)
+    return name
+
+
+def load_sessions() -> dict[str, str]:
+    if not os.path.exists(SESSIONS_FILE):
+        return {}
+    try:
+        with open(SESSIONS_FILE) as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        print(f"Warning: {SESSIONS_FILE} is corrupt. Resetting.")
+        return {}
+
+
+def save_sessions(sessions: dict[str, str]) -> None:
+    dir_path = os.path.dirname(SESSIONS_FILE)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:
+            json.dump(sessions, tmp, indent=2)
+            tmp_path = tmp.name
+        os.replace(tmp_path, SESSIONS_FILE)
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+
+def generate_session_name() -> str:
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    return f"claude-{suffix}"
+
+
+def is_tmux_session_alive(session_name: str) -> bool:
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", f"={session_name}"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def create_tmux_session_with_claude(session_name: str, working_dir: str | None = None) -> None:
+    cmd = ["tmux", "new-session", "-d", "-s", session_name]
+    if working_dir:
+        resolved = os.path.expanduser(working_dir)
+        if not os.path.isdir(resolved):
+            print(f"Error: directory '{resolved}' does not exist.")
+            raise SystemExit(1)
+        cmd.extend(["-c", resolved])
+    cmd.append("claude")
+    subprocess.run(cmd, check=True)
+
+
+def _get_or_create_window_script() -> str:
+    """AppleScript snippet that sets `targetWindow` to an existing window or creates one."""
+    return """
+        set windowCount to count of windows
+        if windowCount > 0 then
+            set targetWindow to current window
+        else
+            set targetWindow to (create window with default profile)
+        end if
+    """
+
+
+LAYOUTS = {
+    "single": """
+    tell application "iTerm2"
+        activate
+        {get_window}
+        tell current session of targetWindow
+            write text "tmux attach-session -t {session_name}"
+        end tell
+    end tell
+    """,
+    "split-right": """
+    tell application "iTerm2"
+        activate
+        {get_window}
+        tell current session of targetWindow
+            write text "tmux attach-session -t {session_name}"
+            set logPane to (split vertically with default profile)
+        end tell
+        tell logPane
+            write text "echo '-- Log pane ready --'"
+        end tell
+    end tell
+    """,
+    "split-bottom": """
+    tell application "iTerm2"
+        activate
+        {get_window}
+        tell current session of targetWindow
+            write text "tmux attach-session -t {session_name}"
+            set logPane to (split horizontally with default profile)
+        end tell
+        tell logPane
+            write text "echo '-- Log pane ready --'"
+        end tell
+    end tell
+    """,
+    "three-pane": """
+    tell application "iTerm2"
+        activate
+        {get_window}
+        tell current session of targetWindow
+            write text "tmux attach-session -t {session_name}"
+            set rightPane to (split vertically with default profile)
+        end tell
+        tell rightPane
+            write text "echo '-- Right pane ready --'"
+            set bottomPane to (split horizontally with default profile)
+        end tell
+        tell bottomPane
+            write text "echo '-- Bottom-right pane ready --'"
+        end tell
+    end tell
+    """,
+}
+
+
+def open_iterm_with_tmux(session_name: str, layout: str = "single") -> None:
+    validate_session_name(session_name)
+    template = LAYOUTS[layout]
+    applescript = template.format(
+        session_name=session_name,
+        get_window=_get_or_create_window_script(),
+    )
+    subprocess.run(["osascript", "-e", applescript], check=True)
+
+
+def capture_pane(session_name: str, lines: int = 200) -> str:
+    result = subprocess.run(
+        ["tmux", "capture-pane", "-t", f"={session_name}", "-p", "-S", f"-{lines}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.rstrip("\n")
+
+
+def send_prompt(session_name: str, prompt: str) -> None:
+    if not is_tmux_session_alive(session_name):
+        print(f"Error: session '{session_name}' not found. Run 'start' first.")
+        raise SystemExit(1)
+
+    subprocess.run(
+        ["tmux", "send-keys", "-t", f"={session_name}", "-l", prompt],
+        check=True,
+    )
+    subprocess.run(
+        ["tmux", "send-keys", "-t", f"={session_name}", "Enter"],
+        check=True,
+    )
+    print(f"Prompt sent to '{session_name}'.")
+
+
+def cmd_start(args: argparse.Namespace) -> None:
+    if args.saved and (args.path or args.name):
+        print("Error: --saved cannot be combined with a path or --name.")
+        raise SystemExit(1)
+
+    if args.saved:
+        sessions = load_sessions()
+        if args.saved not in sessions:
+            print(f"Error: saved session '{args.saved}' not found. Run 'saved' to see available.")
+            raise SystemExit(1)
+        session_name = validate_session_name(args.saved)
+        working_dir = sessions[args.saved]
+    else:
+        session_name = validate_session_name(args.name) if args.name else generate_session_name()
+        working_dir = args.path
+
+    layout = args.layout
+
+    if is_tmux_session_alive(session_name):
+        print(f"Session '{session_name}' already exists, attaching...")
+    else:
+        print(f"Creating tmux session '{session_name}' with Claude Code...")
+        if working_dir:
+            print(f"Working directory: {os.path.expanduser(working_dir)}")
+        create_tmux_session_with_claude(session_name, working_dir)
+
+    if args.detach:
+        print(f"Session '{session_name}' created (detached).")
+        return
+
+    print(f"Opening iTerm2 with layout '{layout}'...")
+    open_iterm_with_tmux(session_name, layout)
+    print("Done.")
+
+
+def cmd_send(args: argparse.Namespace) -> None:
+    validate_session_name(args.session)
+    send_prompt(args.session, args.prompt)
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}\t#{session_windows} windows\t#{session_created_string}\t#{?session_attached,attached,detached}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("No active tmux sessions.")
+        return
+
+    print(f"{'Name':<25} {'Windows':<12} {'Status':<10} {'Created'}")
+    print("-" * 70)
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 4:
+            continue
+        name, windows, created, status = parts
+        print(f"{name:<25} {windows:<12} {status:<10} {created}")
+
+
+def cmd_save(args: argparse.Namespace) -> None:
+    validate_session_name(args.name)
+    resolved = os.path.expanduser(args.path)
+    if not os.path.isdir(resolved):
+        print(f"Error: directory '{resolved}' does not exist.")
+        raise SystemExit(1)
+
+    sessions = load_sessions()
+    sessions[args.name] = resolved
+    save_sessions(sessions)
+    print(f"Saved '{args.name}' -> {resolved}")
+
+
+def cmd_saved(args: argparse.Namespace) -> None:
+    sessions = load_sessions()
+    if not sessions:
+        print("No saved sessions.")
+        return
+
+    print(f"{'Name':<25} {'Path'}")
+    print("-" * 60)
+    for name, path in sessions.items():
+        print(f"{name:<25} {path}")
+
+
+def cmd_kill(args: argparse.Namespace) -> None:
+    validate_session_name(args.session)
+    if not is_tmux_session_alive(args.session):
+        print(f"Error: session '{args.session}' not found.")
+        raise SystemExit(1)
+
+    subprocess.run(
+        ["tmux", "kill-session", "-t", f"={args.session}"],
+        check=True,
+    )
+    print(f"Session '{args.session}' killed.")
+
+
+def cmd_unsave(args: argparse.Namespace) -> None:
+    validate_session_name(args.name)
+    sessions = load_sessions()
+    if args.name not in sessions:
+        print(f"Error: '{args.name}' not found.")
+        raise SystemExit(1)
+
+    del sessions[args.name]
+    save_sessions(sessions)
+    print(f"Removed '{args.name}'.")
+
+
+def cmd_read(args: argparse.Namespace) -> None:
+    validate_session_name(args.session)
+    if not is_tmux_session_alive(args.session):
+        print(f"Error: session '{args.session}' not found. Run 'list' to see active sessions.")
+        raise SystemExit(1)
+
+    lines = min(max(args.lines, 1), MAX_CAPTURE_LINES)
+    output = capture_pane(args.session, lines=lines)
+    print(output)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="tmux + Claude Code launcher")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    start_parser = subparsers.add_parser("start", help="Launch iTerm2 + tmux + Claude Code")
+    start_parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help="Working directory for Claude Code (e.g. ~/Developer/myproject)",
+    )
+    start_parser.add_argument(
+        "--name",
+        default=None,
+        help="Session name (default: random)",
+    )
+    start_parser.add_argument(
+        "--saved",
+        default=None,
+        help="Use a saved session (name + path)",
+    )
+    start_parser.add_argument(
+        "--layout",
+        default="single",
+        choices=LAYOUTS.keys(),
+        help="iTerm2 pane layout (default: single)",
+    )
+    start_parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Create tmux session without opening iTerm2",
+    )
+
+    save_parser = subparsers.add_parser("save", help="Save a session name + path")
+    save_parser.add_argument("name", help="Session name")
+    save_parser.add_argument("path", help="Working directory path")
+
+    subparsers.add_parser("saved", help="List saved sessions")
+
+    unsave_parser = subparsers.add_parser("unsave", help="Remove a saved session")
+    unsave_parser.add_argument("name", help="Session name to remove")
+
+    send_parser = subparsers.add_parser("send", help="Send a prompt to Claude Code")
+    send_parser.add_argument("session", help="Session name")
+    send_parser.add_argument("prompt", help="The prompt text to send")
+
+    read_parser = subparsers.add_parser("read", help="Read current pane output")
+    read_parser.add_argument("session", help="Session name")
+    read_parser.add_argument(
+        "--lines",
+        type=int,
+        default=200,
+        help="Number of scrollback lines to capture (default: 200)",
+    )
+
+    kill_parser = subparsers.add_parser("kill", help="Kill a tmux session")
+    kill_parser.add_argument("session", help="Session name to kill")
+
+    subparsers.add_parser("list", help="List active tmux sessions")
+
+    args = parser.parse_args()
+
+    preflight_check()
+
+    if args.command == "start":
+        cmd_start(args)
+    elif args.command == "send":
+        cmd_send(args)
+    elif args.command == "read":
+        cmd_read(args)
+    elif args.command == "list":
+        cmd_list(args)
+    elif args.command == "save":
+        cmd_save(args)
+    elif args.command == "saved":
+        cmd_saved(args)
+    elif args.command == "unsave":
+        cmd_unsave(args)
+    elif args.command == "kill":
+        cmd_kill(args)
+
+
+if __name__ == "__main__":
+    main()

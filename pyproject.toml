@@ -1,0 +1,10 @@
+[project]
+name = "tmux-poc"
+version = "0.1.0"
+description = "CLI tool to launch and interact with Claude Code sessions via tmux + iTerm2"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+tmux-poc = "main:main"
