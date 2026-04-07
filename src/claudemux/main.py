@@ -99,12 +99,7 @@ def create_tmux_session_with_claude(session_name: str, working_dir: str | None =
 
 
 ITERM2_WINDOW_SCRIPT = """
-    set windowCount to count of windows
-    if windowCount > 0 then
-        set targetWindow to current window
-    else
-        set targetWindow to (create window with default profile)
-    end if
+    set targetWindow to (create window with default profile)
 """
 
 TERMINAL_ADAPTERS: dict[str, dict[str, str]] = {
@@ -185,6 +180,16 @@ SUPPORTED_TERMINALS = list(TERMINAL_ADAPTERS.keys())
 
 
 def detect_terminal() -> str:
+    term_program = os.environ.get("TERM_PROGRAM", "")
+    mapping = {
+        "iTerm.app": "iterm2",
+        "ghostty": "ghostty",
+        "Apple_Terminal": "terminal",
+    }
+    if term_program in mapping:
+        return mapping[term_program]
+
+    # Fallback: check installed apps
     app_checks = [
         ("iterm2", "iTerm.app"),
         ("ghostty", "Ghostty.app"),
