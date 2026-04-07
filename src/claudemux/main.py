@@ -97,7 +97,7 @@ def is_tmux_session_alive(session_name: str) -> bool:
 
 
 def create_tmux_session_with_claude(session_name: str, working_dir: str | None = None) -> None:
-    cmd = ["tmux", "new-session", "-d", "-s", session_name]
+    cmd = ["tmux", "new-session", "-d", "-s", session_name, "-e", "CLAUDEMUX=1"]
     if working_dir:
         resolved = os.path.expanduser(working_dir)
         if not os.path.isdir(resolved):

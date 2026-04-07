@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Only run for sessions created by claudemux
+if [[ "$CLAUDEMUX" != "1" ]]; then
+    exit 0
+fi
+
 SIGNAL_DIR="/tmp/claude-tmux"
 mkdir -p "$SIGNAL_DIR"
 
