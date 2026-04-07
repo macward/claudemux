@@ -21,6 +21,10 @@ uv tool install git+https://github.com/macward/claudemux.git
 git clone git@github.com:macward/claudemux.git
 cd claudemux
 uv tool install .
+
+# Uninstall
+claudemux remove-hooks    # remove Stop hook from Claude settings
+uv tool uninstall claudemux
 ```
 
 ## Commands
