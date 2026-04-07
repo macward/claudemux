@@ -7,6 +7,7 @@ import re
 import shutil
 import string
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -450,11 +451,14 @@ def _atomic_consume(signal_path: str) -> dict | None:
     try:
         with open(consumed_path) as f:
             data = json.load(f)
-        os.unlink(consumed_path)
-        return data
-    except (json.JSONDecodeError, OSError):
-        os.unlink(consumed_path)
+    except json.JSONDecodeError:
+        print(f"Warning: malformed signal file left at {consumed_path}", file=sys.stderr)
         return None
+    try:
+        os.unlink(consumed_path)
+    except OSError:
+        pass
+    return data
 
 
 def read_signal(session_id: str) -> dict | None:
@@ -483,34 +487,40 @@ def cmd_wait(args: argparse.Namespace) -> None:
     timeout = args.timeout
     interval = args.interval
     session_filter = args.session
-    elapsed: float = 0
+    deadline = time.monotonic() + timeout
+
+    if args.clean:
+        stale = glob.glob(os.path.join(SIGNAL_DIR, "*.json"))
+        for f in stale:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+        if stale:
+            print(f"Cleaned {len(stale)} stale signal(s).")
 
     if session_filter:
         print(f"Waiting for session '{session_filter}' to complete (timeout: {timeout}s)...")
     else:
         print(f"Waiting for any Claude session to complete (timeout: {timeout}s)...")
 
-    while elapsed < timeout:
+    while time.monotonic() < deadline:
         signals = glob.glob(os.path.join(SIGNAL_DIR, "*.json"))
         for signal_path in signals:
+            if session_filter:
+                fname = os.path.basename(signal_path)
+                sid = fname.removesuffix(".json")
+                if sid != session_filter:
+                    continue
+
             data = _atomic_consume(signal_path)
             if data is None:
-                continue
-
-            if session_filter and data.get("session_id") != session_filter:
-                # Not ours — restore the signal for other consumers
-                restored_path = os.path.join(
-                    SIGNAL_DIR, f"{data['session_id']}.json"
-                )
-                with open(restored_path, "w") as f:
-                    json.dump(data, f)
                 continue
 
             _print_signal(data)
             return
 
         time.sleep(interval)
-        elapsed += interval
 
     print(f"\nTimeout after {timeout}s — no completion signal received.")
     raise SystemExit(1)
@@ -607,6 +617,11 @@ def main() -> None:
         type=float,
         default=1.0,
         help="Poll interval in seconds (default: 1.0)",
+    )
+    wait_parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Remove stale signal files before waiting",
     )
 
     args = parser.parse_args()
