@@ -81,7 +81,9 @@ claudemux list
 Send a prompt to a running Claude Code session.
 
 ```bash
-claudemux send <session-name> "your prompt here"
+claudemux send my-session "your prompt here"
+claudemux send my-session "refactor the auth module to use async/await"
+claudemux send my-session "/init"
 ```
 
 ### read
@@ -127,8 +129,14 @@ Block until a session completes (reads the signal file).
 # Wait up to 5 minutes (default)
 claudemux wait
 
+# Wait for a specific session
+claudemux wait --session my-session
+
 # Custom timeout
 claudemux wait --timeout 60 --interval 0.5
+
+# Clean stale signals before waiting
+claudemux wait --clean
 ```
 
 ### Typical agent workflow
