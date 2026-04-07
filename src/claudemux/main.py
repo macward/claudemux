@@ -97,7 +97,7 @@ def is_tmux_session_alive(session_name: str) -> bool:
 
 
 def create_tmux_session_with_claude(session_name: str, working_dir: str | None = None) -> None:
-    cmd = ["tmux", "new-session", "-d", "-s", session_name, "-e", "CLAUDEMUX=1"]
+    cmd = ["tmux", "new-session", "-d", "-s", session_name, "-e", "CLAUDEMUX=1", "-e", f"CLAUDEMUX_SESSION={session_name}"]
     if working_dir:
         resolved = os.path.expanduser(working_dir)
         if not os.path.isdir(resolved):
@@ -482,8 +482,8 @@ def consume_signal(session_id: str) -> dict | None:
 
 
 def _print_signal(data: dict) -> None:
-    session_id = data.get("session_id", "unknown")
-    print(f"\nSession completed: {session_id}")
+    name = data.get("session_name", data.get("session_id", "unknown"))
+    print(f"\nSession completed: {name}")
     print(f"  Transcript: {data.get('transcript_path', 'N/A')}")
     print(f"  CWD: {data.get('cwd', 'N/A')}")
     print(f"  Completed at: {data.get('completed_at', 'N/A')}")
